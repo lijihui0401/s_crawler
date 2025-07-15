@@ -122,4 +122,79 @@ t_a_download/
 n_crawler_latest/
 test_*.json
 articles_*.json
-nature_crawler_*.log 
+nature_crawler_*.log
+
+# Science downloads directory (contains PDF files)
+science_downloads/
+downloads/
+crawled_papers/
+
+# Browser cache and user data
+chrome_user_data/
+firefox_profile/
+browser_cache/
+
+# Selenium and webdriver files
+geckodriver*
+msedgedriver*
+operadriver*
+safaridriver*
+
+# Additional temporary files
+*.pid
+*.seed
+*.pid.lock
+
+# Node.js (if any frontend components)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Additional IDE files
+*.sublime-project
+*.sublime-workspace
+.atom/
+.brackets.json
+
+# Additional OS files
+ehthumbs.db
+Icon?
+
+# Additional Python files
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.manifest
+*.spec
+
+# Additional data files
+*.csv
+*.xlsx
+*.xls
+*.dat
+*.out
+
+# Additional log files
+*.log.*
+log/
+logs/
+
+# Additional config files (keep only essential ones)
+*.config
+!config/config.json
+!config/*.example.json
+
+# Additional cache directories
+.cache/
+cache/
+
+# Additional backup files
+*.orig
+*.rej
+*.old
+
+# Additional temporary directories
+tmp/
+temp/ 
