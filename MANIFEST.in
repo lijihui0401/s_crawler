@@ -1,0 +1,31 @@
+# 包含所有Python文件
+include *.py
+
+# 包含配置文件
+include config/*.json
+
+# 包含文档文件
+include README.md
+include LICENSE
+include CHANGELOG.md
+include CONTRIBUTING.md
+include USAGE.md
+
+# 包含依赖文件
+include requirements.txt
+include requirements-dev.txt
+
+# 包含测试文件
+recursive-include tests *.py
+
+# 排除不需要的文件
+exclude *.log
+exclude *.pdf
+exclude downloads/*
+exclude logs/*
+exclude __pycache__/*
+exclude *.pyc
+exclude .git/*
+exclude venv/*
+exclude .vscode/*
+exclude .idea/* 

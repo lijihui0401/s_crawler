@@ -1,0 +1,22 @@
+{
+  "crawler": {
+    "headless": false,
+    "download_dir": "downloads",
+    "max_wait_time": 10,
+    "min_delay": 1.0,
+    "max_delay": 3.0
+  },
+  "search": {
+    "default_max_results": 10,
+    "timeout": 30
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "logs/nature_crawler.log"
+  },
+  "user_agents": [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+  ]
+} 
