@@ -1,173 +1,235 @@
 import time
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.wait import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from .config import ScienceConfig
-from .utils import handle_captcha
 
 class PDFProcessor:
     """PDF处理器，负责处理单个详情页并获取PDF下载链接"""
     
     def __init__(self, driver):
         self.driver = driver
+        from .config import ScienceConfig
         self.config = ScienceConfig()
     
     def process_article(self, article_info):
-        """处理单个文章，获取PDF下载链接并立即下载"""
-        title = article_info["title"]
-        detail_url = article_info["url"]
-        
-        print(f"处理文章: {title}")
+        """处理单个文章，获取PDF下载链接并立即下载。只在详情页查找摘要、关键词、PDF链接，其他字段直接用article_info里的。"""
+        title = article_info.get("title", "Unknown")
+        print(f"[{title}] 开始处理详情页...")
         
         try:
-            # 1. 跳转到详情页
-            self.driver.get(detail_url)
+            # 1. 加载详情页
+            self.driver.get(article_info.get("url"))
             time.sleep(self.config.SLEEP_TIME)
             
-            # 增加页面加载等待时间
+            # 等待页面加载
             try:
-                from selenium.webdriver.support.wait import WebDriverWait
-                from selenium.webdriver.support import expected_conditions as EC
-                WebDriverWait(self.driver, 30).until(
+                WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located(("css selector", "body"))
                 )
             except:
                 print(f"[{title}] 页面加载超时，继续处理...")
             
-            # 检查人机验证
-            if handle_captcha(self.driver):
-                print("人机验证处理完成，继续处理...")
+            # 检查详情页目标元素（标题或PDF按钮）
+            try:
+                self.driver.find_element(By.CSS_SELECTOR, "h1.article-title, i.icon-pdf")
+                print(f"[{title}] 详情页目标元素已加载")
+            except Exception as e:
+                print(f"[{title}] 详情页目标元素未找到: {e}")
+                raise
             
-            # 2. 查找PDF按钮
+            # 2. 只查找摘要、关键词等详情页独有字段
+            article_details = self._extract_article_details()
+            
+            # 3. 查找PDF按钮
             pdf_page_url = self._find_pdf_page_url()
             if not pdf_page_url:
                 print(f"[{title}] 未找到PDF按钮，跳过")
                 return None
             
-            # 3. 跳转到PDF页面
+            # 4. 跳转到PDF页面
             self.driver.get(pdf_page_url)
             time.sleep(self.config.SLEEP_TIME)
             
-            # 检查人机验证
-            if handle_captcha(self.driver):
-                print("人机验证处理完成，继续处理...")
+            # 检查PDF页面目标元素（下载按钮）
+            try:
+                self.driver.find_element(By.CSS_SELECTOR, "#app-navbar > div.btn-group.navbar-right > div.grouped.right > a > span, span.icon.material-icons")
+                print(f"[{title}] PDF页面下载按钮已加载")
+            except Exception as e:
+                print(f"[{title}] PDF页面下载按钮未找到: {e}")
+                raise
             
-            # 4. 获取PDF下载链接
+            # 5. 获取PDF下载链接
             download_link = self._get_pdf_download_link()
             if not download_link:
                 print(f"[{title}] 未找到PDF下载链接，跳过")
                 return None
-            
             print(f"[{title}] 获取到PDF下载链接，开始下载...")
             
-            # 5. 立即下载PDF
+            # 6. 立即下载PDF
             success = self._download_pdf_immediately(title, download_link)
             
-            return {
-                "title": title,
+            # 合并所有信息
+            result = {
+                "title": article_info.get("title"),
+                "url": article_info.get("url"),
                 "download_link": download_link,
-                "downloaded": success
+                "downloaded": success,
+                "doi": article_info.get("doi"),
+                "journal": article_info.get("journal"),
+                "publication_date": article_info.get("publication_date"),
+                "authors": article_info.get("authors", []),
             }
-            
+            # 添加从详情页获取的信息
+            if article_details:
+                result.update(article_details)
+            return result
         except Exception as e:
             print(f"[{title}] 处理异常，跳过：{e}")
             return None
     
     def _find_pdf_page_url(self):
-        """在详情页查找PDF页面URL"""
+        """在详情页查找PDF页面URL - 细化调试每个选择器耗时"""
         try:
             print(f"[DEBUG] 开始查找PDF按钮，当前URL: {self.driver.current_url}")
-            
-            # 方法1：使用你提供的PDF图标选择器（优先）
-            try:
-                pdf_icons = self.driver.find_elements(By.CSS_SELECTOR, "i.icon-pdf")
-                print(f"[DEBUG] 找到{len(pdf_icons)}个PDF图标")
-                
-                for i, icon in enumerate(pdf_icons):
-                    try:
-                        # 找到包含PDF图标的父级a标签
-                        parent_a = icon.find_element(By.XPATH, "./ancestor::a")
-                        pdf_page_href = parent_a.get_attribute("href")
+            pdf_selectors = [
+                "i.icon-pdf",
+                "#main > div.article-container > article > header > div > div.info-panel > div.info-panel__right-content > div.info-panel__formats.info-panel__item > a",
+                "a[href*='pdf']",
+                "a[data-test='pdf-link']",
+                "a[aria-label*='PDF']",
+                ".pdf-link",
+                "a[title*='PDF']"
+            ]
+            for selector in pdf_selectors:
+                t_sel = time.time()
+                try:
+                    if selector == "i.icon-pdf":
+                        pdf_icons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        print(f"[调试] PDF按钮选择器 {selector} 查找{len(pdf_icons)}个icon, 耗时: {time.time() - t_sel:.3f}秒")
+                        for i, icon in enumerate(pdf_icons):
+                            try:
+                                parent_a = icon.find_element(By.XPATH, "./ancestor::a")
+                                pdf_page_href = parent_a.get_attribute("href")
+                                if pdf_page_href:
+                                    pdf_page_url = pdf_page_href if pdf_page_href.startswith("http") else "https://www.science.org" + pdf_page_href
+                                    print(f"[调试] PDF按钮选择器 {selector} 命中, 耗时: {time.time() - t_sel:.3f}秒")
+                                    return pdf_page_url
+                            except NoSuchElementException:
+                                continue
+                    else:
+                        pdf_elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                        pdf_page_href = pdf_elem.get_attribute("href")
                         if pdf_page_href:
                             pdf_page_url = pdf_page_href if pdf_page_href.startswith("http") else "https://www.science.org" + pdf_page_href
-                            print(f"[DEBUG] 通过PDF图标{i+1}找到按钮: {pdf_page_url}")
+                            print(f"[调试] PDF按钮选择器 {selector} 命中, 耗时: {time.time() - t_sel:.3f}秒")
                             return pdf_page_url
-                    except NoSuchElementException:
-                        print(f"[DEBUG] PDF图标{i+1}的父级a标签未找到")
-                        continue
-            except Exception as e:
-                print(f"[DEBUG] 通过PDF图标查找失败: {e}")
-            
-            # 方法2：使用配置中的CSS选择器
+                    print(f"[调试] PDF按钮选择器 {selector} 未命中, 耗时: {time.time() - t_sel:.3f}秒")
+                except NoSuchElementException:
+                    print(f"[调试] PDF按钮选择器 {selector} 未命中, 耗时: {time.time() - t_sel:.3f}秒")
+                    continue
+                except Exception as e:
+                    print(f"[调试] PDF按钮选择器 {selector} 异常: {e}, 耗时: {time.time() - t_sel:.3f}秒")
+                    continue
+            # 兜底方案
             try:
-                pdf_button = self.driver.find_element(By.CSS_SELECTOR, self.config.SELECTORS['pdf_button'])
-                pdf_page_href = pdf_button.get_attribute("href")
-                if pdf_page_href:
-                    pdf_page_url = pdf_page_href if pdf_page_href.startswith("http") else "https://www.science.org" + pdf_page_href
-                    print(f"[DEBUG] 通过CSS选择器找到PDF按钮: {pdf_page_url}")
-                    return pdf_page_url
-            except NoSuchElementException:
-                print("[DEBUG] CSS选择器未找到PDF按钮")
-            
-            # 方法3：使用XPath选择器
-            try:
-                pdf_icon = self.driver.find_element(By.XPATH, '//*[@id="main"]/div[1]/article/header/div/div[5]/div[2]/div[3]/a/i')
-                parent_a = pdf_icon.find_element(By.XPATH, "./ancestor::a")
-                pdf_page_href = parent_a.get_attribute("href")
-                if pdf_page_href:
-                    pdf_page_url = pdf_page_href if pdf_page_href.startswith("http") else "https://www.science.org" + pdf_page_href
-                    print(f"[DEBUG] 通过XPath选择器找到PDF按钮: {pdf_page_url}")
-                    return pdf_page_url
-            except NoSuchElementException:
-                print("[DEBUG] XPath选择器未找到PDF按钮")
-            
-            # 方法4：查找包含"pdf"的链接
-            try:
+                t_sel = time.time()
                 all_links = self.driver.find_elements(By.TAG_NAME, "a")
                 pdf_links = []
                 for link in all_links:
                     href = link.get_attribute("href")
                     if href and "pdf" in href.lower():
                         pdf_links.append(href)
-                
                 if pdf_links:
-                    print(f"[DEBUG] 通过href找到{len(pdf_links)}个PDF链接: {pdf_links[0]}")
+                    print(f"[调试] 兜底PDF链接查找命中, 耗时: {time.time() - t_sel:.3f}秒")
                     return pdf_links[0]
                 else:
-                    print("[DEBUG] 未找到包含'pdf'的链接")
+                    print(f"[调试] 兜底PDF链接查找未命中, 耗时: {time.time() - t_sel:.3f}秒")
             except Exception as e:
-                print(f"[DEBUG] 通过href查找失败: {e}")
-            
-            # 方法5：调试信息 - 显示页面上所有的链接
-            try:
-                all_links = self.driver.find_elements(By.TAG_NAME, "a")
-                print(f"[DEBUG] 页面上共有{len(all_links)}个链接")
-                for i, link in enumerate(all_links[:10]):  # 只显示前10个
-                    href = link.get_attribute("href")
-                    text = link.text[:50] if link.text else "无文本"
-                    print(f"[DEBUG] 链接{i+1}: {text} -> {href}")
-            except Exception as e:
-                print(f"[DEBUG] 获取链接调试信息失败: {e}")
-            
+                print(f"[调试] 兜底PDF链接查找异常: {e}")
             print("[DEBUG] 所有方法都未找到PDF按钮")
             return None
-            
         except Exception as e:
             print(f"[DEBUG] 查找PDF按钮异常：{e}")
             return None
     
     def _get_pdf_download_link(self):
-        """在PDF页面获取下载链接"""
+        """在PDF页面获取下载链接 - 通过点击下载按钮"""
         try:
-            download_a_elem = self.driver.find_element(By.CSS_SELECTOR, self.config.SELECTORS['download_button'])
-            download_link = download_a_elem.get_attribute("href")
+            # 等待页面完全加载
+            import time
+            time.sleep(2)
             
-            if download_link:
-                return download_link
-            else:
+            # 滚动到页面顶部，确保没有遮挡
+            self.driver.execute_script("window.scrollTo(0, 0);")
+            time.sleep(1)
+            
+            # 查找下载按钮
+            download_selectors = [
+                "#app-navbar > div.btn-group.navbar-right > div.grouped.right > a > span",
+                "span.icon.material-icons"
+            ]
+            
+            download_elem = None
+            for selector in download_selectors:
+                try:
+                    download_elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if download_elem:
+                        print(f"[调试] 找到下载按钮: {selector}")
+                        break
+                except NoSuchElementException:
+                    continue
+            
+            if not download_elem:
+                print("[调试] 未找到下载按钮")
+                return None
+            
+            # 向上找到a标签并点击
+            try:
+                parent_a = download_elem.find_element(By.XPATH, "./ancestor::a")
+                download_link = parent_a.get_attribute("href")
+                
+                if download_link:
+                    print(f"[调试] 获取到下载链接: {download_link}")
+                    
+                    # 尝试多种点击方式
+                    try:
+                        # 方式1：直接点击
+                        print("[调试] 尝试直接点击...")
+                        parent_a.click()
+                    except Exception as e1:
+                        print(f"[调试] 直接点击失败: {e1}")
+                        try:
+                            # 方式2：JavaScript点击
+                            print("[调试] 尝试JavaScript点击...")
+                            self.driver.execute_script("arguments[0].click();", parent_a)
+                        except Exception as e2:
+                            print(f"[调试] JavaScript点击失败: {e2}")
+                            try:
+                                # 方式3：滚动到元素位置再点击
+                                print("[调试] 尝试滚动到元素位置...")
+                                self.driver.execute_script("arguments[0].scrollIntoView(true);", parent_a)
+                                time.sleep(1)
+                                parent_a.click()
+                            except Exception as e3:
+                                print(f"[调试] 滚动点击失败: {e3}")
+                                # 方式4：直接访问下载链接
+                                print("[调试] 直接访问下载链接...")
+                                self.driver.get(download_link)
+                    
+                    # 等待下载开始
+                    time.sleep(3)
+                    
+                    return download_link
+                else:
+                    print("[调试] 下载链接为空")
+                    return None
+                    
+            except Exception as e:
+                print(f"[调试] 点击下载按钮失败: {e}")
                 return None
                 
-        except NoSuchElementException:
-            return None
         except Exception as e:
             print(f"获取PDF下载链接异常：{e}")
             return None
@@ -237,4 +299,38 @@ class PDFProcessor:
                 
         except Exception as e:
             print(f"[{title}] 下载异常: {e}")
-            return False 
+            return False
+    
+    def _extract_article_details(self):
+        """提取文章详细信息（摘要、关键词等）- 细化调试每个选择器耗时"""
+        details = {}
+        try:
+            # 提取摘要 - 多选择器详细调试
+            abstract_selectors = [
+                "div[role='paragraph']",  # Science特有的选择器
+                ".abstract p",
+                ".summary p", 
+                "[data-test='abstract'] p",
+                "div.abstract",
+                "div.summary",
+                ".article__body p",  # 文章正文段落
+                "section[data-test='abstract'] p",
+                "p[data-test='article-summary']"
+            ]
+            for selector in abstract_selectors:
+                t_sel = time.time()
+                try:
+                    abstract_elem = self.driver.find_element(By.CSS_SELECTOR, selector)
+                    if abstract_elem and abstract_elem.text.strip():
+                        details["abstract"] = abstract_elem.text.strip()
+                        print(f"[调试] 摘要选择器 {selector} 命中, 耗时: {time.time() - t_sel:.3f}秒")
+                        break
+                except NoSuchElementException:
+                    print(f"[调试] 摘要选择器 {selector} 未命中, 耗时: {time.time() - t_sel:.3f}秒")
+                    continue
+                except Exception as e:
+                    print(f"[调试] 摘要选择器 {selector} 异常: {e}, 耗时: {time.time() - t_sel:.3f}秒")
+                    continue
+        except Exception as e:
+            print(f"[DEBUG] 提取文章详情异常: {e}")
+        return details 

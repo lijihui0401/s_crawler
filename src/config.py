@@ -5,19 +5,37 @@ class ScienceConfig:
     # 基础配置
     SEARCH_URL = "https://www.science.org/action/doSearch?AllField=twist+angle+2D+materials&AfterYear=2010&BeforeYear=2025&queryID=54%2F8297718952&startPage=0&pageSize=10"
     DOWNLOAD_DIR = "science_downloads"
-    MAX_COUNT = 20  # 最大抓取数量
+    MAX_COUNT = 3  # 最大抓取数量（测试用）
     
-    # 并发配置
-    DRIVER_COUNT = 5  # 同时开启的driver数量
-    DOWNLOAD_THREADS = 10  # PDF下载线程数
+    # 单一driver配置
+    DRIVER_COUNT = 1  # 只使用1个driver
+    DOWNLOAD_THREADS = 5  # PDF下载线程数
     
     # 时间配置
-    SLEEP_TIME = 2  # 页面等待时间
+    SLEEP_TIME = 1  # 页面等待时间（从2秒减少到1秒）
     RETRY_COUNT = 1  # 重试次数
     
+    # 反爬虫配置
+    RANDOM_DELAY_MIN = 2  # 随机延迟最小值（秒）
+    RANDOM_DELAY_MAX = 5  # 随机延迟最大值（秒）
+    DOWNLOAD_DELAY_MIN = 1  # 下载前延迟最小值（秒）
+    DOWNLOAD_DELAY_MAX = 3  # 下载前延迟最大值（秒）
+    
     # Chrome配置
-    CHROME_DEBUG_PORT = 9222  # 第一个Chrome调试端口（用于收集链接）
-    CHROME_DEBUG_PORTS = [9223, 9224, 9225, 9226]  # 其他Chrome调试端口（用于并发处理）
+    CHROME_DEBUG_PORT = 9222  # Chrome调试端口
+    
+    # 数据库配置
+    DB_CONFIG = {
+        'host': 'localhost',
+        'user': 'root',
+        'password': '12345678',
+        'database': 'article_t_a_db',
+        'charset': 'utf8mb4',
+        'port': 3306
+    }
+    
+    # 表名
+    TABLE_NAME = 'science'
     
     # 选择器配置
     SELECTORS = {

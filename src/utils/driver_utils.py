@@ -155,52 +155,42 @@ def is_captcha_or_abnormal(driver):
 
 def handle_captcha(driver, timeout=600):
     """
-    先判断页面是否正常，再判断异常（关键词检测）。
-    检测到异常时暂停，等待用户手动处理。
+    简化的重试机制：找不到元素就等待5秒再找，连续三次找不到就刷新页面
     """
-    print(f"\n[DEBUG] 开始验证码检测，当前URL: {driver.current_url}")
+    print(f"\n[DEBUG] 开始元素检测，当前URL: {driver.current_url}")
     
+    # 检查页面是否正常（能找到关键元素）
     if is_page_normal(driver):
-        print("[DEBUG] 页面正常，无需处理验证码")
-        return False  # 页面正常，直接继续
+        print("[DEBUG] 页面正常，无需处理")
+        return False
+    
+    # 连续重试3次
+    for attempt in range(3):
+        print(f"[DEBUG] 第{attempt + 1}次重试，等待5秒...")
+        time.sleep(5)
         
-    if is_captcha_or_abnormal(driver):
-        print("\n" + "="*50)
-        print("⚠️  检测到人机验证/异常页面，请在浏览器中手动完成验证！")
-        print("完成后请按回车键继续...")
-        print("="*50)
+        # 重新检查页面
+        if is_page_normal(driver):
+            print("[DEBUG] 页面恢复正常，继续处理")
+            return True
+    
+    # 连续3次都找不到，刷新页面
+    print("[DEBUG] 连续3次未找到元素，刷新页面...")
+    try:
+        driver.refresh()
+        time.sleep(5)  # 等待页面加载
         
-        # 在多线程环境中，使用文件信号而不是input()
-        import os
-        signal_file = "captcha_signal.txt"
-        
-        # 创建信号文件
-        with open(signal_file, "w") as f:
-            f.write("waiting")
-        
-        start_time = time.time()
-        while not is_page_normal(driver):
-            if time.time() - start_time > timeout:
-                print("等待超时，请重试。")
-                if os.path.exists(signal_file):
-                    os.remove(signal_file)
-                return False
-                
-            print("页面仍异常，请完成验证后删除captcha_signal.txt文件...")
+        # 刷新后再次检查
+        if is_page_normal(driver):
+            print("[DEBUG] 刷新后页面正常，继续处理")
+            return True
+        else:
+            print("[DEBUG] 刷新后页面仍异常，继续处理")
+            return False
             
-            # 检查信号文件是否被删除
-            if not os.path.exists(signal_file):
-                print("检测到信号文件被删除，继续处理...")
-                break
-                
-            time.sleep(2)  # 等待2秒再检查
-            
-        print("页面已恢复正常，继续任务。")
-        return True
-        
-    # 既不正常也没检测到异常，可能是网络问题
-    print("页面异常但未检测到验证码，可能是网络问题，建议刷新页面。")
-    return False
+    except Exception as e:
+        print(f"[DEBUG] 刷新页面失败: {e}")
+        return False
 
 
 def wait_for_element(driver: webdriver.Chrome, by: By, value: str, timeout: int = 10) -> Optional[webdriver.remote.webelement.WebElement]:
