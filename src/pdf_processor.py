@@ -13,64 +13,44 @@ class PDFProcessor:
         from .config import ScienceConfig
         self.config = ScienceConfig()
     
-    def process_article(self, article_info):
-        """处理单个文章，获取PDF下载链接并立即下载。只在详情页查找摘要、关键词、PDF链接，其他字段直接用article_info里的。"""
+    def process_article(self, article_info, cookies_str=None, user_agent=None):
+        """处理单个文章，获取PDF下载链接并立即下载。支持外部传入cookie和user-agent。"""
         title = article_info.get("title", "Unknown")
         print(f"[{title}] 开始处理详情页...")
-        
         try:
-            # 1. 加载详情页
             self.driver.get(article_info.get("url"))
             time.sleep(self.config.SLEEP_TIME)
-            
-            # 等待页面加载
             try:
                 WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located(("css selector", "body"))
                 )
             except:
                 print(f"[{title}] 页面加载超时，继续处理...")
-            
-            # 检查详情页目标元素（标题或PDF按钮）
             try:
                 self.driver.find_element(By.CSS_SELECTOR, "h1.article-title, i.icon-pdf")
                 print(f"[{title}] 详情页目标元素已加载")
             except Exception as e:
                 print(f"[{title}] 详情页目标元素未找到: {e}")
                 raise
-            
-            # 2. 只查找摘要、关键词等详情页独有字段
             article_details = self._extract_article_details()
-            
-            # 3. 查找PDF按钮
             pdf_page_url = self._find_pdf_page_url()
             if not pdf_page_url:
                 print(f"[{title}] 未找到PDF按钮，跳过")
                 return None
-            
-            # 4. 跳转到PDF页面
             self.driver.get(pdf_page_url)
             time.sleep(self.config.SLEEP_TIME)
-            
-            # 检查PDF页面目标元素（下载按钮）
             try:
                 self.driver.find_element(By.CSS_SELECTOR, "#app-navbar > div.btn-group.navbar-right > div.grouped.right > a > span, span.icon.material-icons")
                 print(f"[{title}] PDF页面下载按钮已加载")
             except Exception as e:
                 print(f"[{title}] PDF页面下载按钮未找到: {e}")
                 raise
-            
-            # 5. 获取PDF下载链接
             download_link = self._get_pdf_download_link()
             if not download_link:
                 print(f"[{title}] 未找到PDF下载链接，跳过")
                 return None
             print(f"[{title}] 获取到PDF下载链接，开始下载...")
-            
-            # 6. 立即下载PDF
-            success = self._download_pdf_immediately(title, download_link)
-            
-            # 合并所有信息
+            success = self._download_pdf_immediately(title, download_link, cookies_str, user_agent)
             result = {
                 "title": article_info.get("title"),
                 "url": article_info.get("url"),
@@ -81,7 +61,6 @@ class PDFProcessor:
                 "publication_date": article_info.get("publication_date"),
                 "authors": article_info.get("authors", []),
             }
-            # 添加从详情页获取的信息
             if article_details:
                 result.update(article_details)
             return result
@@ -155,132 +134,57 @@ class PDFProcessor:
             return None
     
     def _get_pdf_download_link(self):
-        """在PDF页面获取下载链接 - 只点击一次，检测新文件出现即break，避免多次下载"""
-        import os
-        import time
-        from .utils import sanitize_filename
-        from selenium.webdriver.support.wait import WebDriverWait
-        from selenium.webdriver.support import expected_conditions as EC
-        from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
+        """在PDF页面获取下载链接 - 只用精准选择器"""
         try:
-            # 等待页面完全加载
-            time.sleep(2)
-            self.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(1)
-            # 等待overlay-screen消失，超时则强制移除
-            try:
-                WebDriverWait(self.driver, 10).until(
-                    lambda d: not d.find_elements(By.CSS_SELECTOR, '.overlay-screen')
-                )
-                print("[调试] overlay-screen 已消失，可以点击下载按钮")
-            except TimeoutException:
-                print("[调试] overlay-screen 长时间未消失，尝试强制移除")
-                self.driver.execute_script("var el=document.querySelector('.overlay-screen');if(el){el.remove();}")
-                time.sleep(0.5)
             a_selector = '#app-navbar > div.btn-group.navbar-right > div.grouped.right > a'
-            download_dir = self.config.DOWNLOAD_DIR
-            before_files = set(f for f in os.listdir(download_dir) if f.lower().endswith('.pdf'))
-            found_new_file = False
-            new_pdf_path = None
-            try:
-                a_elem = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, a_selector))
-                )
-                print(f"[调试] a标签可点击，准备点击")
-            except Exception as e:
-                print(f"[调试] a标签不可点击: {e}")
-                self.driver.save_screenshot('debug_a_not_clickable.png')
-                return None
+            a_elem = self.driver.find_element(By.CSS_SELECTOR, a_selector)
             download_link = a_elem.get_attribute("href")
-            if not download_link:
+            if download_link:
+                print(f"[调试] 精准选择器获取到下载链接: {download_link}")
+                return download_link
+            else:
                 print(f"[调试] 未获取到下载链接，跳过")
                 return None
-            print(f"[调试] 获取到下载链接: {download_link}")
-            self.driver.execute_script("arguments[0].scrollIntoView(true);", a_elem)
-            time.sleep(0.5)
-            try:
-                a_elem.click()
-            except Exception as e1:
-                print(f"[调试] 直接点击失败: {e1}")
-                try:
-                    self.driver.execute_script("arguments[0].click();", a_elem)
-                except Exception as e2:
-                    print(f"[调试] JavaScript点击失败: {e2}")
-            # 点击后循环检测新文件，发现新文件立即break
-            for _ in range(20):  # 最多等10秒
-                time.sleep(0.5)
-                after_files = set(f for f in os.listdir(download_dir) if f.lower().endswith('.pdf'))
-                new_files = after_files - before_files
-                if new_files:
-                    new_pdf_path = os.path.join(download_dir, list(new_files)[0])
-                    print(f"[调试] 检测到新PDF文件: {new_files}，停止点击")
-                    found_new_file = True
-                    break
-            # 校验新PDF文件是否真实下载且大于10KB
-            if found_new_file and new_pdf_path and os.path.exists(new_pdf_path):
-                last_size = -1
-                for _ in range(10):
-                    size = os.path.getsize(new_pdf_path)
-                    if size == last_size:
-                        break
-                    last_size = size
-                    time.sleep(0.5)
-                if os.path.getsize(new_pdf_path) > 10 * 1024:
-                    print(f"[调试] PDF文件校验通过: {new_pdf_path}, 大小: {os.path.getsize(new_pdf_path)} bytes")
-                    return download_link
-                else:
-                    print(f"[调试] PDF文件过小或下载失败: {new_pdf_path}, 大小: {os.path.getsize(new_pdf_path)} bytes")
-                    os.remove(new_pdf_path)
-                    return None
-            else:
-                print("[调试] 未检测到有效PDF文件，下载失败")
-                return None
         except Exception as e:
-            print(f"获取PDF下载链接异常：{e}")
+            print(f"[调试] 获取PDF下载链接异常: {e}")
             return None
     
-    def _download_pdf_immediately(self, title, download_link):
-        """立即下载PDF文件"""
+    def _download_pdf_immediately(self, title, download_link, cookies_str=None, user_agent=None):
+        """用requests+cookie下载PDF文件"""
         try:
-            from .utils import sanitize_filename, download_file
+            from .utils import sanitize_filename
             import os
-            
+            import requests
             # 创建下载目录
             download_dir = self.config.DOWNLOAD_DIR
             os.makedirs(download_dir, exist_ok=True)
-            
-            # 生成文件名
             filename = sanitize_filename(title) + ".pdf"
             filepath = os.path.join(download_dir, filename)
-            
-            # 获取当前driver的cookies
-            cookies = {c['name']: c['value'] for c in self.driver.get_cookies()}
-            
-            # 设置请求头
+            # 处理cookie
+            def cookie_str_to_dict(cookie_str):
+                cookies = {}
+                for item in cookie_str.split(';'):
+                    if '=' in item:
+                        k, v = item.strip().split('=', 1)
+                        cookies[k] = v
+                return cookies
+            cookies = cookie_str_to_dict(cookies_str) if cookies_str else {c['name']: c['value'] for c in self.driver.get_cookies()}
             headers = {
-                'User-Agent': self.driver.execute_script("return navigator.userAgent;"),
+                'User-Agent': user_agent or self.driver.execute_script("return navigator.userAgent;"),
                 'Referer': self.driver.current_url,
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept': 'application/pdf,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate',
                 'Connection': 'keep-alive',
-                'Upgrade-Insecure-Requests': '1',
             }
-            
-            # 使用requests下载，带重试机制
-            import requests
             max_retries = 3
-            
             for attempt in range(max_retries):
                 try:
                     response = requests.get(download_link, headers=headers, cookies=cookies, stream=True, timeout=30)
-                    
-                    if response.status_code == 200:
+                    if response.status_code == 200 and 'application/pdf' in response.headers.get('Content-Type', ''):
                         with open(filepath, 'wb') as f:
                             for chunk in response.iter_content(chunk_size=8192):
                                 if chunk:
                                     f.write(chunk)
-                        
                         print(f"[{title}] 下载成功: {filepath}")
                         return True
                     elif response.status_code == 403:
@@ -289,19 +193,16 @@ class PDFProcessor:
                     else:
                         print(f"[{title}] 下载失败: HTTP {response.status_code} (尝试 {attempt + 1}/{max_retries})")
                         if attempt < max_retries - 1:
-                            time.sleep(2 ** attempt)  # 指数退避
+                            time.sleep(2 ** attempt)
                         else:
                             return False
-                            
                 except Exception as e:
                     print(f"[{title}] 下载异常 (尝试 {attempt + 1}/{max_retries}): {e}")
                     if attempt < max_retries - 1:
                         time.sleep(2 ** attempt)
                     else:
                         return False
-            
             return False
-                
         except Exception as e:
             print(f"[{title}] 下载异常: {e}")
             return False
