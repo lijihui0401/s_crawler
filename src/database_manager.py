@@ -118,3 +118,17 @@ class DatabaseManager:
         except Exception as e:
             print(f"搜索文章失败: {e}")
             return [] 
+
+    def is_doi_exists(self, doi: str) -> bool:
+        """判断指定DOI是否已存在于数据库"""
+        try:
+            conn = pymysql.connect(**self.config.DB_CONFIG)
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT id FROM {self.table_name} WHERE doi=%s", (doi,))
+            exists = cursor.fetchone() is not None
+            cursor.close()
+            conn.close()
+            return exists
+        except Exception as e:
+            print(f"DOI查重失败: {e}")
+            return False 

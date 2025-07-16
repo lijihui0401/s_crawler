@@ -6,6 +6,7 @@ from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from .config import ScienceConfig
+from .database_manager import DatabaseManager
 
 class LinkCollector:
     """链接收集器，负责从Science搜索页收集详情页链接"""
@@ -16,11 +17,12 @@ class LinkCollector:
         self.performance_stats = {}  # 性能统计
     
     def collect_all_links(self):
-        """收集所有详情页链接"""
+        """收集所有详情页链接，动态查重，直到达到MAX_COUNT或无更多新文章"""
         print("开始收集详情页链接...")
         start_time = time.time()
         links = []
         page_num = 1
+        db_manager = DatabaseManager()
         
         while True:
             page_start_time = time.time()
@@ -44,10 +46,18 @@ class LinkCollector:
             page_links = self._collect_page_links()
             collection_time = time.time() - collection_start
             
-            links.extend(page_links)
+            # === 新增：动态查重 ===
+            for article in page_links:
+                doi = article.get('doi')
+                if doi and db_manager.is_doi_exists(doi):
+                    print(f"已存在（DOI查重）: {article['title']}")
+                    continue
+                links.append(article)
+                if len(links) >= self.config.MAX_COUNT:
+                    break
             
             page_total_time = time.time() - page_start_time
-            print(f"第{page_num}页收集到{len(page_links)}条链接，总计{len(links)}条")
+            print(f"第{page_num}页收集到{len(page_links)}条链接，总计{len(links)}条（不重复）")
             print(f"[性能] 第{page_num}页总耗时: {page_total_time:.3f}秒")
             print(f"[性能] 链接收集耗时: {collection_time:.3f}秒")
             print(f"[性能] 平均每个链接耗时: {collection_time/len(page_links):.3f}秒" if page_links else "无链接")
@@ -68,7 +78,7 @@ class LinkCollector:
         
         total_time = time.time() - start_time
         print(f"\n" + "=" * 60)
-        print(f"收集完成！共收集到{len(links)}条详情页链接")
+        print(f"收集完成！共收集到{len(links)}条详情页链接（不重复）")
         print(f"[性能] 总耗时: {total_time:.3f}秒")
         print(f"[性能] 平均每页耗时: {total_time/page_num:.3f}秒")
         print(f"[性能] 平均每个链接耗时: {total_time/len(links):.3f}秒" if links else "无链接")

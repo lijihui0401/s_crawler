@@ -155,81 +155,96 @@ class PDFProcessor:
             return None
     
     def _get_pdf_download_link(self):
-        """在PDF页面获取下载链接 - 通过点击下载按钮"""
+        """在PDF页面获取下载链接 - 只用a标签element_to_be_clickable判断和点击"""
+        import os
+        import time
+        from .utils import sanitize_filename
+        from selenium.webdriver.support.wait import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
+        from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
         try:
             # 等待页面完全加载
-            import time
             time.sleep(2)
-            
-            # 滚动到页面顶部，确保没有遮挡
             self.driver.execute_script("window.scrollTo(0, 0);")
             time.sleep(1)
-            
-            # 查找下载按钮
-            download_selectors = [
-                "#app-navbar > div.btn-group.navbar-right > div.grouped.right > a > span",
-                "span.icon.material-icons"
-            ]
-            
-            download_elem = None
-            for selector in download_selectors:
-                try:
-                    download_elem = self.driver.find_element(By.CSS_SELECTOR, selector)
-                    if download_elem:
-                        print(f"[调试] 找到下载按钮: {selector}")
-                        break
-                except NoSuchElementException:
-                    continue
-            
-            if not download_elem:
-                print("[调试] 未找到下载按钮")
-                return None
-            
-            # 向上找到a标签并点击
+            # 等待overlay-screen消失，超时则强制移除
             try:
-                parent_a = download_elem.find_element(By.XPATH, "./ancestor::a")
-                download_link = parent_a.get_attribute("href")
-                
-                if download_link:
-                    print(f"[调试] 获取到下载链接: {download_link}")
-                    
-                    # 尝试多种点击方式
+                WebDriverWait(self.driver, 10).until(
+                    lambda d: not d.find_elements(By.CSS_SELECTOR, '.overlay-screen')
+                )
+                print("[调试] overlay-screen 已消失，可以点击下载按钮")
+            except TimeoutException:
+                print("[调试] overlay-screen 长时间未消失，尝试强制移除")
+                self.driver.execute_script("var el=document.querySelector('.overlay-screen');if(el){el.remove();}")
+                time.sleep(0.5)
+            a_selector = '#app-navbar > div.btn-group.navbar-right > div.grouped.right > a'
+            download_dir = self.config.DOWNLOAD_DIR
+            before_files = set(f for f in os.listdir(download_dir) if f.lower().endswith('.pdf'))
+            found_new_file = False
+            new_pdf_path = None
+            max_attempts = 5
+            for attempt in range(max_attempts):
+                try:
                     try:
-                        # 方式1：直接点击
-                        print("[调试] 尝试直接点击...")
-                        parent_a.click()
+                        a_elem = WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR, a_selector))
+                        )
+                        print(f"[调试] 第{attempt+1}次a标签可点击")
+                    except Exception as e:
+                        print(f"[调试] 第{attempt+1}次a标签不可点击: {e}")
+                        self.driver.save_screenshot(f'debug_a_not_clickable_{attempt+1}.png')
+                        continue
+                    download_link = a_elem.get_attribute("href")
+                    if not download_link:
+                        print(f"[调试] 第{attempt+1}次未获取到下载链接，跳过本次尝试")
+                        continue
+                    print(f"[调试] 第{attempt+1}次获取到下载链接: {download_link}")
+                    self.driver.execute_script("arguments[0].scrollIntoView(true);", a_elem)
+                    time.sleep(0.5)
+                    try:
+                        a_elem.click()
                     except Exception as e1:
                         print(f"[调试] 直接点击失败: {e1}")
                         try:
-                            # 方式2：JavaScript点击
-                            print("[调试] 尝试JavaScript点击...")
-                            self.driver.execute_script("arguments[0].click();", parent_a)
+                            self.driver.execute_script("arguments[0].click();", a_elem)
                         except Exception as e2:
                             print(f"[调试] JavaScript点击失败: {e2}")
-                            try:
-                                # 方式3：滚动到元素位置再点击
-                                print("[调试] 尝试滚动到元素位置...")
-                                self.driver.execute_script("arguments[0].scrollIntoView(true);", parent_a)
-                                time.sleep(1)
-                                parent_a.click()
-                            except Exception as e3:
-                                print(f"[调试] 滚动点击失败: {e3}")
-                                # 方式4：直接访问下载链接
-                                print("[调试] 直接访问下载链接...")
-                                self.driver.get(download_link)
-                    
-                    # 等待下载开始
-                    time.sleep(3)
-                    
+                    # 点击后循环检测新文件，发现新文件立即break
+                    for check in range(8):  # 最多等4秒
+                        time.sleep(0.5)
+                        after_files = set(f for f in os.listdir(download_dir) if f.lower().endswith('.pdf'))
+                        new_files = after_files - before_files
+                        if new_files:
+                            new_pdf_path = os.path.join(download_dir, list(new_files)[0])
+                            print(f"[调试] 检测到新PDF文件: {new_files}，停止点击")
+                            found_new_file = True
+                            break
+                    if found_new_file:
+                        break
+                except StaleElementReferenceException:
+                    print(f"[调试] 第{attempt+1}次a标签stale，重试")
+                    continue
+                except Exception as e:
+                    print(f"[调试] 第{attempt+1}次点击异常: {e}")
+            # 校验新PDF文件是否真实下载且大于10KB
+            if found_new_file and new_pdf_path and os.path.exists(new_pdf_path):
+                last_size = -1
+                for _ in range(10):
+                    size = os.path.getsize(new_pdf_path)
+                    if size == last_size:
+                        break
+                    last_size = size
+                    time.sleep(0.5)
+                if os.path.getsize(new_pdf_path) > 10 * 1024:
+                    print(f"[调试] PDF文件校验通过: {new_pdf_path}, 大小: {os.path.getsize(new_pdf_path)} bytes")
                     return download_link
                 else:
-                    print("[调试] 下载链接为空")
+                    print(f"[调试] PDF文件过小或下载失败: {new_pdf_path}, 大小: {os.path.getsize(new_pdf_path)} bytes")
+                    os.remove(new_pdf_path)
                     return None
-                    
-            except Exception as e:
-                print(f"[调试] 点击下载按钮失败: {e}")
+            else:
+                print("[调试] 未检测到有效PDF文件，下载失败")
                 return None
-                
         except Exception as e:
             print(f"获取PDF下载链接异常：{e}")
             return None

@@ -75,11 +75,22 @@ def main():
             return
         print(f"成功收集到{len(all_articles)}篇文章")
         
+        # === 新增：下载前DOI查重 ===
+        db_manager = DatabaseManager()
+        unique_articles = []
+        for article in all_articles:
+            doi = article.get('doi')
+            if doi and db_manager.is_doi_exists(doi):
+                print(f"已存在（DOI查重）: {article['title']}")
+                continue
+            unique_articles.append(article)
+        print(f"查重后剩余{len(unique_articles)}篇文章")
+        
         # 第二步：处理文章获取PDF链接
         print("\n第二步：处理文章获取PDF链接")
         print("-" * 40)
         t0 = time.time()
-        pdf_tasks = driver_manager.process_articles(all_articles)
+        pdf_tasks = driver_manager.process_articles(unique_articles)
         step_times['处理文章获取PDF链接'] = time.time() - t0
         
         if not pdf_tasks:
