@@ -92,7 +92,17 @@ def main():
         t0 = time.time()
         pdf_tasks = driver_manager.process_articles(unique_articles)
         step_times['处理文章获取PDF链接'] = time.time() - t0
-        
+
+        print(f"[调试] pdf_tasks 类型: {type(pdf_tasks)}")
+        if isinstance(pdf_tasks, list):
+            print(f"[调试] pdf_tasks 长度: {len(pdf_tasks)}")
+            for idx, t in enumerate(pdf_tasks[:5]):
+                print(f"[调试] pdf_tasks[{idx}]: {str(t)[:300]}")
+            if len(pdf_tasks) > 5:
+                print(f"[调试] ... 共{len(pdf_tasks)}条，仅展示前5条 ...")
+        else:
+            print(f"[调试] pdf_tasks 内容: {str(pdf_tasks)[:500]}")
+
         if not pdf_tasks:
             print("没有获取到任何PDF下载链接，程序退出")
             return
@@ -110,26 +120,21 @@ def main():
         print(f"User-Agent: {user_agent[:50]}...")
         
         download_manager = DownloadManager()
-        
+        db_manager = DatabaseManager()
         import random
         for i, task in enumerate(pdf_tasks):
+            print(f"[调试] 进入下载检测循环，task类型: {type(task)}, 内容摘要: {str(task)[:300]}")
             if task and task.get('download_link'):
                 print(f"检查第{i+1}个PDF: {task['title']}")
-                
                 from src.utils import sanitize_filename
                 filename = sanitize_filename(task['title']) + ".pdf"
                 filepath = os.path.join(config.DOWNLOAD_DIR, filename)
-                
+                abs_filepath = os.path.abspath(filepath)
+                print(f"[调试] 检查PDF绝对路径: {abs_filepath}")
                 # 检查文件是否已经下载
                 if os.path.exists(filepath):
                     success = True
                     print(f"PDF已存在: {task['title']}")
-                else:
-                    success = False
-                    print(f"PDF未找到: {task['title']}")
-                
-                task['downloaded'] = success
-                if success:
                     import hashlib
                     try:
                         md5_hash = hashlib.md5()
@@ -141,47 +146,50 @@ def main():
                     except Exception as e:
                         print(f"计算MD5失败: {e}")
                         task['pdf_md5'] = None
+                    # === 下载成功立即入库 ===
+                    article_data = {
+                        'title': task.get('title'),
+                        'url': task.get('url'),
+                        'doi': task.get('doi'),
+                        'authors': task.get('authors', []),
+                        'journal': task.get('journal', 'Science'),
+                        'abstract': task.get('abstract', ''),
+                        'keywords': task.get('keywords', []),
+                        'publication_date': task.get('publication_date'),
+                        'pdf_url': task.get('download_link'),
+                        'download_path': task.get('download_path'),
+                        'pdf_md5': task.get('pdf_md5')
+                    }
+                    print(f"[调试] 尝试入库数据: {article_data}")
+                    try:
+                        single_save = db_manager.save_articles_to_database([article_data])
+                        print(f"[调试] 数据库返回: {single_save}")
+                        if single_save:
+                            print(f"已保存到数据库: {task['title']}")
+                        else:
+                            print(f"保存到数据库失败: {task['title']}")
+                    except Exception as e:
+                        print(f"[调试] 入库异常: {e}")
                 else:
+                    success = False
+                    print(f"PDF未找到: {task['title']}")
+                    print(f"[调试] 未检测到PDF文件: {abs_filepath}")
+                task['downloaded'] = success
+                if not success:
                     task['pdf_md5'] = None
                     print(f"下载失败: {task['title']}")
-                
                 # 下载间隔，避免过于频繁
                 if i < len(pdf_tasks) - 1:  # 不是最后一个
                     interval = random.uniform(config.RANDOM_DELAY_MIN, config.RANDOM_DELAY_MAX)
                     print(f"等待 {interval:.1f} 秒后继续下一个下载...")
                     time.sleep(interval)
         step_times['下载PDF文件'] = time.time() - t0
-        
+
         # 第四步：保存到数据库
         print("\n第四步：保存到数据库")
         print("-" * 40)
         t0 = time.time()
-        db_manager = DatabaseManager()
-        articles_to_save = []
-        for task in pdf_tasks:
-            if task and task.get('downloaded', False):
-                article_data = {
-                    'title': task.get('title'),
-                    'url': task.get('url'),
-                    'doi': task.get('doi'),
-                    'authors': task.get('authors', []),
-                    'journal': task.get('journal', 'Science'),
-                    'abstract': task.get('abstract', ''),
-                    'keywords': task.get('keywords', []),
-                    'publication_date': task.get('publication_date'),
-                    'pdf_url': task.get('download_link'),
-                    'download_path': task.get('download_path'),
-                    'pdf_md5': task.get('pdf_md5')
-                }
-                articles_to_save.append(article_data)
-        if articles_to_save:
-            success = db_manager.save_articles_to_database(articles_to_save)
-            if success:
-                print(f"成功保存{len(articles_to_save)}篇文章到数据库")
-            else:
-                print("保存到数据库失败")
-        else:
-            print("没有成功下载的文章需要保存")
+        print("已在下载环节逐条保存，无需批量保存")
         step_times['保存到数据库'] = time.time() - t0
         
         # 第五步：统计结果

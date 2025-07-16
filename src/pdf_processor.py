@@ -186,6 +186,7 @@ class PDFProcessor:
                                 if chunk:
                                     f.write(chunk)
                         print(f"[{title}] 下载成功: {filepath}")
+                        print(f"[调试] PDFProcessor 实际下载绝对路径: {os.path.abspath(filepath)}")
                         return True
                     elif response.status_code == 403:
                         print(f"[{title}] 下载失败: HTTP 403 (可能需要订阅权限)")
