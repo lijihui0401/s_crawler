@@ -155,7 +155,7 @@ class PDFProcessor:
             return None
     
     def _get_pdf_download_link(self):
-        """在PDF页面获取下载链接 - 只用a标签element_to_be_clickable判断和点击"""
+        """在PDF页面获取下载链接 - 只点击一次，检测新文件出现即break，避免多次下载"""
         import os
         import time
         from .utils import sanitize_filename
@@ -182,50 +182,40 @@ class PDFProcessor:
             before_files = set(f for f in os.listdir(download_dir) if f.lower().endswith('.pdf'))
             found_new_file = False
             new_pdf_path = None
-            max_attempts = 5
-            for attempt in range(max_attempts):
+            try:
+                a_elem = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, a_selector))
+                )
+                print(f"[调试] a标签可点击，准备点击")
+            except Exception as e:
+                print(f"[调试] a标签不可点击: {e}")
+                self.driver.save_screenshot('debug_a_not_clickable.png')
+                return None
+            download_link = a_elem.get_attribute("href")
+            if not download_link:
+                print(f"[调试] 未获取到下载链接，跳过")
+                return None
+            print(f"[调试] 获取到下载链接: {download_link}")
+            self.driver.execute_script("arguments[0].scrollIntoView(true);", a_elem)
+            time.sleep(0.5)
+            try:
+                a_elem.click()
+            except Exception as e1:
+                print(f"[调试] 直接点击失败: {e1}")
                 try:
-                    try:
-                        a_elem = WebDriverWait(self.driver, 5).until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, a_selector))
-                        )
-                        print(f"[调试] 第{attempt+1}次a标签可点击")
-                    except Exception as e:
-                        print(f"[调试] 第{attempt+1}次a标签不可点击: {e}")
-                        self.driver.save_screenshot(f'debug_a_not_clickable_{attempt+1}.png')
-                        continue
-                    download_link = a_elem.get_attribute("href")
-                    if not download_link:
-                        print(f"[调试] 第{attempt+1}次未获取到下载链接，跳过本次尝试")
-                        continue
-                    print(f"[调试] 第{attempt+1}次获取到下载链接: {download_link}")
-                    self.driver.execute_script("arguments[0].scrollIntoView(true);", a_elem)
-                    time.sleep(0.5)
-                    try:
-                        a_elem.click()
-                    except Exception as e1:
-                        print(f"[调试] 直接点击失败: {e1}")
-                        try:
-                            self.driver.execute_script("arguments[0].click();", a_elem)
-                        except Exception as e2:
-                            print(f"[调试] JavaScript点击失败: {e2}")
-                    # 点击后循环检测新文件，发现新文件立即break
-                    for check in range(8):  # 最多等4秒
-                        time.sleep(0.5)
-                        after_files = set(f for f in os.listdir(download_dir) if f.lower().endswith('.pdf'))
-                        new_files = after_files - before_files
-                        if new_files:
-                            new_pdf_path = os.path.join(download_dir, list(new_files)[0])
-                            print(f"[调试] 检测到新PDF文件: {new_files}，停止点击")
-                            found_new_file = True
-                            break
-                    if found_new_file:
-                        break
-                except StaleElementReferenceException:
-                    print(f"[调试] 第{attempt+1}次a标签stale，重试")
-                    continue
-                except Exception as e:
-                    print(f"[调试] 第{attempt+1}次点击异常: {e}")
+                    self.driver.execute_script("arguments[0].click();", a_elem)
+                except Exception as e2:
+                    print(f"[调试] JavaScript点击失败: {e2}")
+            # 点击后循环检测新文件，发现新文件立即break
+            for _ in range(20):  # 最多等10秒
+                time.sleep(0.5)
+                after_files = set(f for f in os.listdir(download_dir) if f.lower().endswith('.pdf'))
+                new_files = after_files - before_files
+                if new_files:
+                    new_pdf_path = os.path.join(download_dir, list(new_files)[0])
+                    print(f"[调试] 检测到新PDF文件: {new_files}，停止点击")
+                    found_new_file = True
+                    break
             # 校验新PDF文件是否真实下载且大于10KB
             if found_new_file and new_pdf_path and os.path.exists(new_pdf_path):
                 last_size = -1
