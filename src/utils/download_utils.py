@@ -13,70 +13,59 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 
-def download_file(url: str, filepath: str, timeout: int = 30, max_retries: int = 3) -> bool:
+def download_file(url: str, filepath: str, timeout: int = 30, max_retries: int = 3, cookies: Optional[str] = None, user_agent: Optional[str] = None) -> bool:
     """
-    下载文件
-    
-    Args:
-        url: 下载URL
-        filepath: 保存路径
-        timeout: 超时时间（秒）
-        max_retries: 最大重试次数
-        
-    Returns:
-        是否下载成功
+    下载文件，支持自定义cookie和user-agent，并严格校验为PDF
     """
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': user_agent or 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
         'Accept-Encoding': 'gzip, deflate',
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1',
     }
-    
+    session = requests.Session()
+    if cookies:
+        headers['Cookie'] = cookies
     for attempt in range(max_retries):
         try:
             logger.info(f"开始下载: {url}")
             logger.info(f"保存到: {filepath}")
-            
-            # 确保目录存在
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            
-            # 下载文件
-            response = requests.get(url, headers=headers, timeout=timeout, stream=True)
+            response = session.get(url, headers=headers, timeout=timeout, stream=True)
             response.raise_for_status()
-            
-            # 获取文件大小
-            total_size = int(response.headers.get('content-length', 0))
-            
-            # 写入文件
+            content_type = response.headers.get('Content-Type', '')
+            if 'pdf' not in content_type.lower():
+                logger.error(f"下载失败: Content-Type不是PDF, 而是: {content_type}")
+                return False
+            # 检查文件头
+            iter_content = response.iter_content(chunk_size=8192)
+            try:
+                first_chunk = next(iter_content)
+            except StopIteration:
+                logger.error("下载失败: 文件内容为空")
+                return False
+            if b'%PDF' not in first_chunk[:10]:
+                logger.error("下载失败: 文件头不是PDF标志")
+                return False
             with open(filepath, 'wb') as f:
-                downloaded = 0
-                for chunk in response.iter_content(chunk_size=8192):
+                f.write(first_chunk)
+                for chunk in iter_content:
                     if chunk:
                         f.write(chunk)
-                        downloaded += len(chunk)
-                        
-                        # 显示进度
-                        if total_size > 0:
-                            progress = (downloaded / total_size) * 100
-                            logger.info(f"下载进度: {progress:.1f}% ({downloaded}/{total_size} bytes)")
-            
             logger.info(f"下载完成: {filepath}")
             return True
-            
         except requests.exceptions.RequestException as e:
             logger.warning(f"下载失败 (尝试 {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)  # 指数退避
+                time.sleep(2 ** attempt)
             else:
                 logger.error(f"下载最终失败: {url}")
                 return False
         except Exception as e:
             logger.error(f"下载时发生未知错误: {e}")
             return False
-    
     return False
 
 

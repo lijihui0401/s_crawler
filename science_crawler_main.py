@@ -19,6 +19,14 @@ from src.link_collector import LinkCollector
 from src.driver_manager import DriverManager
 from src.download_manager import DownloadManager
 from src.database_manager import DatabaseManager
+from src.utils.download_utils import download_file  # 新增
+
+import hashlib
+import random
+
+# 用户自定义cookie和user-agent
+COOKIES = "MACHINE_LAST_SEEN=2025-07-16T03%3A44%3A40.172-07%3A00;__gads=ID=cfa66b58f227b128:T=1752401220:RT=1752662996:S=ALNI_MaerjnUjKibf-S0HYOSBFPDJEhwcg;cookiePolicy=iaccept;consent={\"Marketing\":true,\"created_time\":\"2025-07-13T10:07:24.745Z\"};MAID=zV5gW1r5p3ESCgsZ80tePw==;__gpi=UID=0000115ee5b17a1d:T=1752401220:RT=1752662996:S=ALNI_MaiLSSFYJFT1hHFVuUaNaaXcOOXdQ;weby_location_cookie={\"location_requires_cookie_consent\":\"true\",\"location_requires_cookie_paywall\":\"false\",\"int\":\"22fb890f-1b07-4380-a472-c8bbb1157f5c\"};s_pltp=www.science.org%2Fdoi%2Fepdf%2F10.1126%2Fscience.abl8371;__cf_bm=DD9RtTzPm8KTr3DXCDw6SRfiWGLFgYQXhNgGKp8ob_Y-1752662680-1.0.1.1-P_DE_N_Pme6b5nBCyDOjHpPRsz2Ek4bq5mbDTJ8YqbBf32rOuM2hbDp9A9w1HhZxsbT5rk47MEO44R4FMSk1Spa_T7g42MasjGzpdQOoPac;__eoi=ID=afe440858526065e:T=1752401220:RT=1752662996:S=AA-AfjaBDP0vNp5CQzIuSJT_0DFS;JSESSIONID=04685CEEF358FA4A0AFAFEF7511AAEB2;s_plt=1.55"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36"
 
 def main():
     """主函数"""
@@ -41,6 +49,9 @@ def main():
     t0 = time.time()
     driver_manager = DriverManager()
     step_times['DriverManager初始化'] = time.time() - t0
+    
+    # 新增：初始化download_manager
+    download_manager = DownloadManager()
     
     try:
         # 创建单个driver实例
@@ -108,83 +119,68 @@ def main():
             return
         print(f"成功获取到{len(pdf_tasks)}个PDF下载链接")
         
-        # 第三步：下载PDF文件
-        print("\n第三步：下载PDF文件")
+        # 第三步：严格串行处理PDF下载和入库
+        print("\n第三步：严格串行处理PDF下载和入库")
         print("-" * 40)
         t0 = time.time()
         
-        # 重新获取最新的cookies和user_agent
-        print("重新获取最新的cookies和user_agent...")
-        cookies, user_agent = driver_manager.get_cookies_and_user_agent()
-        print(f"获取到 {len(cookies)} 个cookies")
-        print(f"User-Agent: {user_agent[:50]}...")
-        
-        download_manager = DownloadManager()
-        db_manager = DatabaseManager()
-        import random
-        for i, task in enumerate(pdf_tasks):
-            print(f"[调试] 进入下载检测循环，task类型: {type(task)}, 内容摘要: {str(task)[:300]}")
-            if task and task.get('download_link'):
-                print(f"检查第{i+1}个PDF: {task['title']}")
-                from src.utils import sanitize_filename
-                filename = sanitize_filename(task['title']) + ".pdf"
+        success_count = 0
+        for idx, task in enumerate(pdf_tasks, 1):
+            print(f"\n=== 处理第 {idx}/{len(pdf_tasks)} 条 ===")
+            print(f"文章: {task['title']}")
+            print(f"DOI: {task.get('doi', '无')}")
+            try:
+                # 1. 下载PDF
+                filename = utils.sanitize_filename(task['title']) + ".pdf"
                 filepath = os.path.join(config.DOWNLOAD_DIR, filename)
-                abs_filepath = os.path.abspath(filepath)
-                print(f"[调试] 检查PDF绝对路径: {abs_filepath}")
-                # 检查文件是否已经下载
-                if os.path.exists(filepath):
-                    success = True
-                    print(f"PDF已存在: {task['title']}")
-                    import hashlib
-                    try:
-                        md5_hash = hashlib.md5()
-                        with open(filepath, "rb") as f:
-                            for chunk in iter(lambda: f.read(4096), b""):
-                                md5_hash.update(chunk)
-                        task['pdf_md5'] = md5_hash.hexdigest()
-                        task['download_path'] = filepath
-                    except Exception as e:
-                        print(f"计算MD5失败: {e}")
-                        task['pdf_md5'] = None
-                    # === 下载成功立即入库 ===
-                    article_data = {
-                        'title': task.get('title'),
-                        'url': task.get('url'),
-                        'doi': task.get('doi'),
-                        'authors': task.get('authors', []),
-                        'journal': task.get('journal', 'Science'),
-                        'abstract': task.get('abstract', ''),
-                        'keywords': task.get('keywords', []),
-                        'publication_date': task.get('publication_date'),
-                        'pdf_url': task.get('download_link'),
-                        'download_path': task.get('download_path'),
-                        'pdf_md5': task.get('pdf_md5')
-                    }
-                    print(f"[调试] 尝试入库数据: {article_data}")
-                    try:
-                        single_save = db_manager.save_articles_to_database([article_data])
-                        print(f"[调试] 数据库返回: {single_save}")
-                        if single_save:
-                            print(f"已保存到数据库: {task['title']}")
-                        else:
-                            print(f"保存到数据库失败: {task['title']}")
-                    except Exception as e:
-                        print(f"[调试] 入库异常: {e}")
+                if not os.path.exists(filepath):
+                    print("> 开始下载PDF...")
+                    if not download_file(
+                        url=task['download_link'],
+                        filepath=filepath,
+                        timeout=30,
+                        max_retries=3,
+                        cookies=COOKIES,
+                        user_agent=USER_AGENT
+                    ):
+                        print("! PDF下载失败，跳过该文章")
+                        continue
+                # 2. 计算MD5
+                print("> 计算文件指纹...")
+                with open(filepath, "rb") as f:
+                    md5_hash = hashlib.md5(f.read()).hexdigest()
+                task['pdf_md5'] = md5_hash
+                task['download_path'] = filepath
+                # 3. 立即入库
+                print("> 写入数据库...")
+                article_data = {
+                    'title': task['title'],
+                    'url': task['url'],
+                    'doi': task.get('doi'),
+                    'authors': task.get('authors', []),
+                    'journal': task.get('journal', 'Science'),
+                    'abstract': task.get('abstract', ''),
+                    'keywords': task.get('keywords', []),
+                    'publication_date': task.get('publication_date'),
+                    'pdf_url': task['download_link'],
+                    'download_path': task['download_path'],
+                    'pdf_md5': task['pdf_md5']
+                }
+                if db_manager.save_articles_to_database([article_data]):
+                    success_count += 1
+                    print(f"√ 成功入库 (总计: {success_count}/{len(pdf_tasks)})")
                 else:
-                    success = False
-                    print(f"PDF未找到: {task['title']}")
-                    print(f"[调试] 未检测到PDF文件: {abs_filepath}")
-                task['downloaded'] = success
-                if not success:
-                    task['pdf_md5'] = None
-                    print(f"下载失败: {task['title']}")
-                # 下载间隔，避免过于频繁
-                if i < len(pdf_tasks) - 1:  # 不是最后一个
-                    interval = random.uniform(config.RANDOM_DELAY_MIN, config.RANDOM_DELAY_MAX)
-                    print(f"等待 {interval:.1f} 秒后继续下一个下载...")
-                    time.sleep(interval)
-        step_times['下载PDF文件'] = time.time() - t0
-
+                    print("! 数据库写入失败")
+            except Exception as e:
+                print(f"! 处理失败: {str(e)}")
+                continue
+            # 间隔等待
+            if idx < len(pdf_tasks):
+                delay = random.uniform(1.0, 3.0)
+                print(f"> 等待 {delay:.1f}秒...")
+                time.sleep(delay)
+        step_times['下载和入库'] = time.time() - t0
+        
         # 第四步：保存到数据库
         print("\n第四步：保存到数据库")
         print("-" * 40)

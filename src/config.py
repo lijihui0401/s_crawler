@@ -3,9 +3,9 @@ import os
 # Science期刊爬虫配置
 class ScienceConfig:
     # 基础配置
-    SEARCH_URL = "https://www.science.org/action/doSearch?AllField=twist+angle+2D+materials&AfterYear=2010&BeforeYear=2025&queryID=54%2F8297718952&startPage=0&pageSize=10"
+    SEARCH_URL = "https://www.science.org/action/doSearch?AllField=twist+angle+2D+materials&AfterYear=2010&BeforeYear=2025&queryID=54%2F8297718952&startPage=0&pageSize=100"
     DOWNLOAD_DIR = "science_downloads"
-    MAX_COUNT = 10  # 最大抓取数量
+    MAX_COUNT = 50  # 最大抓取数量
     
     # 单一driver配置
     DRIVER_COUNT = 1  # 只使用1个driver
