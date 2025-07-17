@@ -26,12 +26,13 @@ class PDFProcessor:
                 )
             except:
                 print(f"[{title}] 页面加载超时，继续处理...")
+            # 只检查PDF按钮，不检查标题（标题已在搜索页获取）
             try:
-                self.driver.find_element(By.CSS_SELECTOR, "h1.article-title, i.icon-pdf")
-                print(f"[{title}] 详情页目标元素已加载")
+                self.driver.find_element(By.CSS_SELECTOR, "i.icon-pdf")
+                print(f"[{title}] PDF按钮已加载")
             except Exception as e:
-                print(f"[{title}] 详情页目标元素未找到: {e}")
-                raise
+                print(f"[{title}] PDF按钮未找到: {e}")
+                # 不立即抛出异常，继续尝试其他方法
             article_details = self._extract_article_details()
             pdf_page_url = self._find_pdf_page_url()
             if not pdf_page_url:
@@ -73,6 +74,7 @@ class PDFProcessor:
         try:
             print(f"[DEBUG] 开始查找PDF按钮，当前URL: {self.driver.current_url}")
             pdf_selectors = [
+                "#main > div.article-container > article > header > div > div.info-panel > div.info-panel__right-content > div.info-panel__formats.info-panel__item > a > i",
                 "i.icon-pdf",
                 "#main > div.article-container > article > header > div > div.info-panel > div.info-panel__right-content > div.info-panel__formats.info-panel__item > a",
                 "a[href*='pdf']",
@@ -84,7 +86,21 @@ class PDFProcessor:
             for selector in pdf_selectors:
                 t_sel = time.time()
                 try:
-                    if selector == "i.icon-pdf":
+                    # 新增：如果是你提供的i选择器，找父级a
+                    if selector == "#main > div.article-container > article > header > div > div.info-panel > div.info-panel__right-content > div.info-panel__formats.info-panel__item > a > i":
+                        icons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        print(f"[调试] PDF按钮选择器 {selector} 查找{len(icons)}个icon, 耗时: {time.time() - t_sel:.3f}秒")
+                        for icon in icons:
+                            try:
+                                parent_a = icon.find_element(By.XPATH, "./parent::a")
+                                pdf_page_href = parent_a.get_attribute("href")
+                                if pdf_page_href:
+                                    pdf_page_url = pdf_page_href if pdf_page_href.startswith("http") else "https://www.science.org" + pdf_page_href
+                                    print(f"[调试] PDF按钮选择器 {selector} 命中, 耗时: {time.time() - t_sel:.3f}秒")
+                                    return pdf_page_url
+                            except NoSuchElementException:
+                                continue
+                    elif selector == "i.icon-pdf":
                         pdf_icons = self.driver.find_elements(By.CSS_SELECTOR, selector)
                         print(f"[调试] PDF按钮选择器 {selector} 查找{len(pdf_icons)}个icon, 耗时: {time.time() - t_sel:.3f}秒")
                         for i, icon in enumerate(pdf_icons):

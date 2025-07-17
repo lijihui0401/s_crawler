@@ -35,8 +35,8 @@ class DriverManager:
             print(f"创建Driver 失败：{e}")
             return False
     
-    def process_articles(self, articles):
-        """使用单个driver处理文章"""
+    def process_articles(self, articles, callback=None):
+        """使用单个driver处理文章，支持逐条处理回调"""
         if not self.driver:
             print("没有可用的driver实例")
             return []
@@ -51,7 +51,11 @@ class DriverManager:
                 print(f"处理第{i+1}篇文章: {article['title']}")
                 result = processor.process_article(article)
                 if result:
-                    results.append(result)
+                    # 如果有回调函数，立即处理
+                    if callback:
+                        callback(result, i+1, len(articles))
+                    else:
+                        results.append(result)
                     print(f"第{i+1}篇文章处理成功")
                 else:
                     print(f"第{i+1}篇文章处理失败")
@@ -65,7 +69,10 @@ class DriverManager:
                 print(f"处理文章异常：{e}")
                 continue
         
-        print(f"完成处理，成功获取{len(results)}个PDF链接")
+        if callback:
+            print(f"完成处理，已通过回调函数逐条处理")
+        else:
+            print(f"完成处理，成功获取{len(results)}个PDF链接")
         return results
     
     def get_cookies_and_user_agent(self):

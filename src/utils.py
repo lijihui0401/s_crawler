@@ -93,7 +93,7 @@ def download_pdf_with_requests(download_link, filename, cookies, user_agent, dow
                     cookies=cookies,
                     timeout=60,
                     stream=True
-                )
+        )
         
         r.raise_for_status()
         
@@ -114,12 +114,12 @@ def download_pdf_with_requests(download_link, filename, cookies, user_agent, dow
     except Exception as e:
         print(f"[{filename}] 下载失败：{e}")
     
-    if retry > 0:
+        if retry > 0:
         print(f"[{filename}] 正在重试... (剩余重试次数: {retry-1})")
         time.sleep(random.uniform(3, 6))  # 重试前等待更长时间
-        return download_pdf_with_requests(download_link, filename, cookies, user_agent, download_dir, retry=retry-1)
+            return download_pdf_with_requests(download_link, filename, cookies, user_agent, download_dir, retry=retry-1)
     
-    return False
+        return False
 
 def is_page_normal(driver):
     """判断页面是否为正常内容（如能否获取到论文卡片/标题等元素）"""

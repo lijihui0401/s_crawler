@@ -97,46 +97,27 @@ def main():
             unique_articles.append(article)
         print(f"查重后剩余{len(unique_articles)}篇文章")
         
-        # 第二步：处理文章获取PDF链接
-        print("\n第二步：处理文章获取PDF链接")
-        print("-" * 40)
-        t0 = time.time()
-        pdf_tasks = driver_manager.process_articles(unique_articles)
-        step_times['处理文章获取PDF链接'] = time.time() - t0
-
-        print(f"[调试] pdf_tasks 类型: {type(pdf_tasks)}")
-        if isinstance(pdf_tasks, list):
-            print(f"[调试] pdf_tasks 长度: {len(pdf_tasks)}")
-            for idx, t in enumerate(pdf_tasks[:5]):
-                print(f"[调试] pdf_tasks[{idx}]: {str(t)[:300]}")
-            if len(pdf_tasks) > 5:
-                print(f"[调试] ... 共{len(pdf_tasks)}条，仅展示前5条 ...")
-        else:
-            print(f"[调试] pdf_tasks 内容: {str(pdf_tasks)[:500]}")
-
-        if not pdf_tasks:
-            print("没有获取到任何PDF下载链接，程序退出")
-            return
-        print(f"成功获取到{len(pdf_tasks)}个PDF下载链接")
-        
-        # 第三步：严格串行处理PDF下载和入库
-        print("\n第三步：严格串行处理PDF下载和入库")
+        # 第二步和第三步合并：逐条处理文章获取PDF链接并立即下载入库
+        print("\n第二步：逐条处理文章获取PDF链接并立即下载入库")
         print("-" * 40)
         t0 = time.time()
         
         success_count = 0
-        for idx, task in enumerate(pdf_tasks, 1):
-            print(f"\n=== 处理第 {idx}/{len(pdf_tasks)} 条 ===")
-            print(f"文章: {task['title']}")
-            print(f"DOI: {task.get('doi', '无')}")
+        
+        def process_single_article(result, current_idx, total_count):
+            """处理单篇文章的回调函数"""
+            nonlocal success_count
+            print(f"\n=== 处理第 {current_idx}/{total_count} 条 ===")
+            print(f"文章: {result['title']}")
+            print(f"DOI: {result.get('doi', '无')}")
             try:
                 # 1. 下载PDF
-                filename = utils.sanitize_filename(task['title']) + ".pdf"
+                filename = utils.sanitize_filename(result['title']) + ".pdf"
                 filepath = os.path.join(config.DOWNLOAD_DIR, filename)
                 if not os.path.exists(filepath):
                     print("> 开始下载PDF...")
                     if not download_file(
-                        url=task['download_link'],
+                        url=result['download_link'],
                         filepath=filepath,
                         timeout=30,
                         max_retries=3,
@@ -144,42 +125,45 @@ def main():
                         user_agent=USER_AGENT
                     ):
                         print("! PDF下载失败，跳过该文章")
-                        continue
+                        return
                 # 2. 计算MD5
                 print("> 计算文件指纹...")
                 with open(filepath, "rb") as f:
                     md5_hash = hashlib.md5(f.read()).hexdigest()
-                task['pdf_md5'] = md5_hash
-                task['download_path'] = filepath
+                result['pdf_md5'] = md5_hash
+                result['download_path'] = filepath
                 # 3. 立即入库
                 print("> 写入数据库...")
                 article_data = {
-                    'title': task['title'],
-                    'url': task['url'],
-                    'doi': task.get('doi'),
-                    'authors': task.get('authors', []),
-                    'journal': task.get('journal', 'Science'),
-                    'abstract': task.get('abstract', ''),
-                    'keywords': task.get('keywords', []),
-                    'publication_date': task.get('publication_date'),
-                    'pdf_url': task['download_link'],
-                    'download_path': task['download_path'],
-                    'pdf_md5': task['pdf_md5']
+                    'title': result['title'],
+                    'url': result['url'],
+                    'doi': result.get('doi'),
+                    'authors': result.get('authors', []),
+                    'journal': result.get('journal', 'Science'),
+                    'abstract': result.get('abstract', ''),
+                    'keywords': result.get('keywords', []),
+                    'publication_date': result.get('publication_date'),
+                    'pdf_url': result['download_link'],
+                    'download_path': result['download_path'],
+                    'pdf_md5': result['pdf_md5']
                 }
                 if db_manager.save_articles_to_database([article_data]):
                     success_count += 1
-                    print(f"√ 成功入库 (总计: {success_count}/{len(pdf_tasks)})")
+                    print(f"√ 成功入库 (总计: {success_count})")
                 else:
                     print("! 数据库写入失败")
             except Exception as e:
                 print(f"! 处理失败: {str(e)}")
-                continue
+                return
             # 间隔等待
-            if idx < len(pdf_tasks):
+            if current_idx < total_count:
                 delay = random.uniform(1.0, 3.0)
                 print(f"> 等待 {delay:.1f}秒...")
                 time.sleep(delay)
-        step_times['下载和入库'] = time.time() - t0
+        
+        # 使用回调函数逐条处理
+        driver_manager.process_articles(unique_articles, callback=process_single_article)
+        step_times['逐条处理文章'] = time.time() - t0
         
         # 第四步：保存到数据库
         print("\n第四步：保存到数据库")
@@ -192,15 +176,9 @@ def main():
         print("\n第五步：统计结果")
         print("-" * 40)
         t0 = time.time()
-        successful_downloads = [task for task in pdf_tasks if task and task.get('downloaded', False)]
-        failed_downloads = [task for task in pdf_tasks if task and not task.get('downloaded', False)]
         print(f"下载完成！")
-        print(f"成功下载: {len(successful_downloads)}个")
-        print(f"下载失败: {len(failed_downloads)}个")
-        if failed_downloads:
-            print("\n下载失败的文件：")
-            for task in failed_downloads:
-                print(f"- {task['title']}")
+        print(f"成功下载: {success_count}个")
+        print(f"下载失败: {len(unique_articles) - success_count}个")
         stats = download_manager.get_download_stats()
         print(f"\n下载统计：")
         print(f"总文件数：{stats['total_files']}")

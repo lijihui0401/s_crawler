@@ -54,7 +54,7 @@ def test_detail_performance():
     except:
         print("页面加载超时，继续处理...")
     step_times['等待页面加载'] = time.time() - t0
-
+    
     # 检查页面元素（只检测详情页目标元素：标题或PDF按钮）
     t0 = time.time()
     try:
@@ -65,7 +65,7 @@ def test_detail_performance():
         print(f"页面目标元素未找到: {e}")
         raise
     step_times['页面元素检测'] = time.time() - t0
-
+    
     # 提取摘要
     t0 = time.time()
     details = {}
@@ -75,7 +75,7 @@ def test_detail_performance():
         print(f"摘要提取异常: {e}")
         raise
     step_times['提取摘要/关键词'] = time.time() - t0
-
+    
     # 查找PDF按钮
     t0 = time.time()
     pdf_page_url = None
@@ -87,13 +87,13 @@ def test_detail_performance():
         print(f"查找PDF按钮异常: {e}")
         raise
     step_times['查找PDF按钮'] = time.time() - t0
-
+    
     # 跳转到PDF页面
     t0 = time.time()
     if pdf_page_url:
         driver.get(pdf_page_url)
     step_times['加载PDF页面'] = time.time() - t0
-
+    
     # 检查PDF页面元素（只检测下载按钮）
     t0 = time.time()
     try:
@@ -103,7 +103,7 @@ def test_detail_performance():
         print(f"PDF页面下载按钮未找到: {e}")
         raise
     step_times['PDF页面元素检测'] = time.time() - t0
-
+    
     # 获取PDF下载链接
     t0 = time.time()
     download_link = None
