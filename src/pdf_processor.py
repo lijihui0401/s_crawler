@@ -209,6 +209,12 @@ class PDFProcessor:
     def _download_pdf_immediately(self, title, download_link, cookies_str=None, user_agent=None):
         """用requests+cookie下载PDF文件"""
         try:
+            # 在真实用户行为中，用户从详情页到点击下载会有停顿，这里加入 20-30 秒的随机延迟
+            import random
+            random_delay = random.uniform(20, 30)
+            print(f"[{title}] 模拟用户阅读，等待 {random_delay:.1f} 秒后开始下载...")
+            time.sleep(random_delay)
+
             from .utils import sanitize_filename
             import os
             import requests
