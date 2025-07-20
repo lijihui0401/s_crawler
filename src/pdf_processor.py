@@ -51,12 +51,13 @@ class PDFProcessor:
                 print(f"[{title}] 未找到PDF下载链接，跳过")
                 return None
             print(f"[{title}] 获取到PDF下载链接，开始下载...")
-            success = self._download_pdf_immediately(title, download_link, cookies_str, user_agent)
+            success, file_path = self._download_pdf_immediately(title, download_link, cookies_str, user_agent)
             result = {
                 "title": article_info.get("title"),
                 "url": article_info.get("url"),
                 "download_link": download_link,
                 "downloaded": success,
+                "download_path": file_path,
                 "doi": article_info.get("doi"),
                 "journal": article_info.get("journal"),
                 "publication_date": article_info.get("publication_date"),
@@ -302,26 +303,26 @@ class PDFProcessor:
                                     
                         print(f"[{title}] 下载成功: {filepath}")
                         print(f"[调试] PDFProcessor 实际下载绝对路径: {os.path.abspath(filepath)}")
-                        return True
+                        return True, filepath
                     elif response.status_code == 403:
                         print(f"[{title}] 下载失败: HTTP 403 (可能需要订阅权限)")
-                        return False
+                        return False, None
                     else:
                         print(f"[{title}] 下载失败: HTTP {response.status_code} (尝试 {attempt + 1}/{max_retries})")
                         if attempt < max_retries - 1:
                             time.sleep(2 ** attempt)
                         else:
-                            return False
+                            return False, None
                 except Exception as e:
                     print(f"[{title}] 下载异常 (尝试 {attempt + 1}/{max_retries}): {e}")
                     if attempt < max_retries - 1:
                         time.sleep(2 ** attempt)
                     else:
-                        return False
-            return False
+                        return False, None
+            return False, None
         except Exception as e:
             print(f"[{title}] 下载异常: {e}")
-            return False
+            return False, None
     
     def _extract_article_details(self):
         """提取文章详细信息（摘要、关键词等）- 细化调试每个选择器耗时"""
