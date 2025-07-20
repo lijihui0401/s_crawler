@@ -12,8 +12,8 @@ def sanitize_filename(filename):
     """清理文件名，移除非法字符"""
     filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
     filename = re.sub(r'\s+', ' ', filename).strip()
-    if len(filename) > 200:
-        filename = filename[:200]
+    if len(filename) > 150:  # 增加长度限制但保持原有接口
+        filename = filename[:147] + "..."
     return filename or "untitled"
 
 def create_driver(use_existing_browser=True, debug_port=9222):
@@ -252,19 +252,10 @@ def handle_captcha(driver, timeout=600):
 
 def calculate_file_md5(filepath):
     """计算文件的MD5哈希值"""
-    try:
-        if not os.path.exists(filepath):
-            return None
-            
-        md5_hash = hashlib.md5()
+    import hashlib
         with open(filepath, "rb") as f:
-            # 分块读取大文件，避免内存占用过大
-            for chunk in iter(lambda: f.read(4096), b""):
-                md5_hash.update(chunk)
-        return md5_hash.hexdigest()
-    except Exception as e:
-        print(f"计算MD5失败: {e}")
-        return None
+        md5_hash = hashlib.md5(f.read()).hexdigest()
+    return md5_hash
 
 def download_file(url, filepath, timeout=30, max_retries=3):
     """下载文件并返回MD5值"""

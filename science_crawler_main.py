@@ -110,56 +110,133 @@ def main():
             print(f"\n=== 处理第 {current_idx}/{total_count} 条 ===")
             print(f"文章: {result['title']}")
             print(f"DOI: {result.get('doi', '无')}")
+            
+            # 1. 下载PDF阶段
             try:
-                # 1. 下载PDF
                 filename = utils.sanitize_filename(result['title']) + ".pdf"
                 filepath = os.path.join(config.DOWNLOAD_DIR, filename)
-                if not os.path.exists(filepath):
-                    print("> 开始下载PDF...")
-                    if not download_file(
-                        url=result['download_link'],
-                        filepath=filepath,
-                        timeout=30,
-                        max_retries=3,
-                        cookies=COOKIES,
-                        user_agent=USER_AGENT
-                    ):
-                        print("! PDF下载失败，跳过该文章")
-                        return
-                # 2. 计算MD5
-                print("> 计算文件指纹...")
-                with open(filepath, "rb") as f:
-                    md5_hash = hashlib.md5(f.read()).hexdigest()
-                result['pdf_md5'] = md5_hash
-                result['download_path'] = filepath
-                # 3. 立即入库
-                print("> 写入数据库...")
-                article_data = {
-                    'title': result['title'],
-                    'url': result['url'],
-                    'doi': result.get('doi'),
-                    'authors': result.get('authors', []),
-                    'journal': result.get('journal', 'Science'),
-                    'abstract': result.get('abstract', ''),
-                    'keywords': result.get('keywords', []),
-                    'publication_date': result.get('publication_date'),
-                    'pdf_url': result['download_link'],
-                    'download_path': result['download_path'],
-                    'pdf_md5': result['pdf_md5']
-                }
-                if db_manager.save_articles_to_database([article_data]):
-                    success_count += 1
-                    print(f"√ 成功入库 (总计: {success_count})")
+                
+                # 防止文件名重复
+                base_filepath = filepath
+                counter = 1
+                while os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                    name_parts = os.path.splitext(filename)
+                    new_filename = f"{name_parts[0]}_{counter}{name_parts[1]}"
+                    filepath = os.path.join(config.DOWNLOAD_DIR, new_filename)
+                    counter += 1
+                
+                # 检查是否已经下载了PDF（可能是由PDFProcessor下载的）
+                # 在PDFProcessor下载后，文件名可能已经被重命名，需要查找所有可能的文件名
+                pdf_exists = False
+                actual_filepath = None
+                
+                # 检查原始文件名
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                    pdf_exists = True
+                    actual_filepath = filepath
                 else:
-                    print("! 数据库写入失败")
+                    # 检查可能的重命名文件
+                    for i in range(1, 10):  # 检查最多10个可能的重命名
+                        name_parts = os.path.splitext(filename)
+                        possible_name = f"{name_parts[0]}_{i}{name_parts[1]}"
+                        possible_path = os.path.join(config.DOWNLOAD_DIR, possible_name)
+                        if os.path.exists(possible_path) and os.path.getsize(possible_path) > 0:
+                            pdf_exists = True
+                            actual_filepath = possible_path
+                            break
+                
+                if pdf_exists and actual_filepath:
+                    print(f"> 发现已下载的PDF文件: {os.path.basename(actual_filepath)}")
+                    download_success = True
+                else:
+                    # 尝试下载
+                    print(f"> 未找到已下载的PDF文件，尝试下载...")
+                    # 检查两个可能的键名
+                    download_link = result.get('pdf_url') or result.get('download_link')
+                    if not download_link:
+                        print(f"! 没有PDF下载链接，但将继续处理文章信息")
+                        # 即使没有下载链接，也继续处理
+                        actual_filepath = None
+                        download_success = False
+                    else:
+                        # 保存PDF下载链接到结果字典
+                        result['pdf_url'] = download_link
+                        download_success = False
+                        for attempt in range(3):
+                            try:
+                                download_success = utils.download_file(download_link, filepath, timeout=30)
+                                if download_success:
+                                    actual_filepath = filepath
+                                    break
+                            except Exception as e:
+                                print(f"下载失败: {str(e)}")
+                        
+                        if not download_success:
+                            print(f"下载最终失败: {download_link}")
+                            print(f"! PDF下载失败，但将继续处理文章信息")
+                            actual_filepath = None
+                
+                # 2. PDF处理阶段
+                try:
+                    # 计算PDF的MD5（如果有PDF文件）
+                    if actual_filepath and os.path.exists(actual_filepath):
+                        import hashlib
+                        with open(actual_filepath, "rb") as f:
+                            pdf_md5 = hashlib.md5(f.read()).hexdigest()
+                        result['pdf_md5'] = pdf_md5
+                        result['download_path'] = actual_filepath
+                    
+                    result['download_success'] = download_success
+                    
+                    # 确保pdf_url键存在（可能是从download_link复制）
+                    if result.get('download_link') and not result.get('pdf_url'):
+                        result['pdf_url'] = result['download_link']
+                    
+                    # 确保必需的URL字段存在
+                    if not result.get('url'):
+                        result['url'] = result.get('detail_url') or result.get('url', 'https://www.science.org')
+                    
+                    # 3. 数据库入库阶段
+                    try:
+                        # 打印完整的文章数据用于调试
+                        print("\n--- 准备保存到数据库的文章数据 ---")
+                        print(f"标题: {result.get('title')}")
+                        print(f"DOI: {result.get('doi')}")
+                        print(f"URL: {result.get('url')}")
+                        print(f"PDF URL: {result.get('pdf_url')}")
+                        print(f"下载路径: {result.get('download_path')}")
+                        print(f"PDF MD5: {result.get('pdf_md5')}")
+                        print(f"作者: {result.get('authors')}")
+                        print(f"摘要: {result.get('abstract', '')[:50]}...")
+                        print("-----------------------------------\n")
+                        
+                        # 确保必要字段存在
+                        if not result.get('title'):
+                            print("× 文章缺少标题，无法保存到数据库")
+                            return
+                            
+                        if not result.get('url'):
+                            print("× 文章缺少URL，无法保存到数据库")
+                            return
+                        
+                        # 保存到数据库
+                        from src.database_manager import DatabaseManager
+                        db_manager = DatabaseManager()
+                        saved = db_manager.save_articles_to_database([result])
+                        if saved:
+                            success_count += 1
+                            print(f"√ 文章信息已成功保存到数据库")
+                        else:
+                            print(f"× 文章信息保存到数据库失败")
+                    except Exception as e:
+                        print(f"数据库保存异常: {str(e)}")
+                except Exception as e:
+                    print(f"PDF处理异常: {str(e)}")
             except Exception as e:
-                print(f"! 处理失败: {str(e)}")
-                return
-            # 间隔等待
-            if current_idx < total_count:
-                delay = random.uniform(1.0, 3.0)
-                print(f"> 等待 {delay:.1f}秒...")
-                time.sleep(delay)
+                print(f"处理异常: {str(e)}")
+            
+            print(f"第{current_idx}篇文章处理成功")
+            print(f"进度: {current_idx}/{total_count}")
         
         # 使用回调函数逐条处理
         driver_manager.process_articles(unique_articles, callback=process_single_article)

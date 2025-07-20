@@ -23,17 +23,26 @@ class DatabaseManager:
             
             for i, article in enumerate(articles):
                 try:
-                    # 检查是否已存在（通过DOI或标题）
+                    # 检查是否已存在（优先 DOI）
+                    # 1. 先按 DOI 去重（只要 DOI 不重复，就允许写入）
                     if article.get('doi'):
                         cursor.execute(f"SELECT id FROM {self.table_name} WHERE doi=%s", (article['doi'],))
                         if cursor.fetchone():
                             print(f"已存在（DOI）: {article['title']}")
                             continue
                     
-                    if article.get('title'):
+                    # 2. 当 DOI 为空时，再按 MD5 查重
+                    if (not article.get('doi')) and article.get('pdf_md5'):
+                        cursor.execute(f"SELECT id FROM {self.table_name} WHERE pdf_md5=%s", (article['pdf_md5'],))
+                        if cursor.fetchone():
+                            print(f"已存在（MD5）(无DOI): {article['title']}")
+                            continue
+                    
+                    # 3. 若 DOI、MD5 均为空，再按标题查重
+                    if (not article.get('doi')) and (not article.get('pdf_md5')) and article.get('title'):
                         cursor.execute(f"SELECT id FROM {self.table_name} WHERE title=%s", (article['title'],))
                         if cursor.fetchone():
-                            print(f"已存在（标题）: {article['title']}")
+                            print(f"已存在（标题）(无DOI/MD5): {article['title']}")
                             continue
                     
                     # 插入新文章
@@ -43,6 +52,14 @@ class DatabaseManager:
                      url, pdf_url, download_path, pdf_md5)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """
+                    
+                    # 打印完整的参数值，便于调试
+                    print(f"准备插入文章: {article.get('title')}")
+                    print(f"DOI: {article.get('doi')}")
+                    print(f"URL: {article.get('url')}")
+                    print(f"PDF URL: {article.get('pdf_url')}")
+                    print(f"下载路径: {article.get('download_path')}")
+                    print(f"PDF MD5: {article.get('pdf_md5')}")
                     
                     cursor.execute(sql, (
                         article.get('doi'),
@@ -62,6 +79,9 @@ class DatabaseManager:
                     
                 except Exception as e:
                     print(f"保存文章失败: {article.get('title', 'Unknown')} - {e}")
+                    # 打印更详细的错误信息
+                    import traceback
+                    traceback.print_exc()
                     continue
             
             conn.commit()
@@ -73,6 +93,8 @@ class DatabaseManager:
             
         except Exception as e:
             print(f"数据库操作失败: {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def get_article_count(self) -> int:
